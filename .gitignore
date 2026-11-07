@@ -1,0 +1,7 @@
+*
+!.gitignore
+!scripts/
+scripts/*
+!scripts/nudge-once.ps1
+!scripts/watchdog-edge-cdp.ps1
+!scripts/install-edge-cdp-watchdog.ps1
