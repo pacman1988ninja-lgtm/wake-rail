@@ -1,4 +1,4 @@
-# И-95.1: nudge-once.ps1 v3 — одноразовый адресный толчок сессий (single-shot nudge).
+﻿# И-95.1: nudge-once.ps1 v3 — одноразовый адресный толчок сессий (single-shot nudge).
 # Протокол: PRE -> reload(опц.) -> CHECK-IDLE -> PRECLEAR -> SNAPSHOT A/MSGS-A
 #           -> composer '1' -> нормализация пробелов -> ОДИН клик -> MSGS-C -> CONFIRM -> CLEANUP.
 # Гарды: существующая вкладка по заголовку (без createTarget); ОДНА отправка максимум;
