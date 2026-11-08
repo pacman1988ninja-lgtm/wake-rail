@@ -6,15 +6,26 @@ $logDir = Join-Path $dir 'logs'
 $stateFile = Join-Path $stateDir 'nudge-scan-last-run.json'
 $guardLog = Join-Path $logDir 'watchdog-nudge-scan-task.log'
 function Find-Daemon {
-    return @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+    $found = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object {
         $_.CommandLine -match 'nudge-scan\.ps1' -and $_.CommandLine -notmatch 'watchdog|guard'
     } | Select-Object -First 1)
+    if ($found.Count -gt 0) { return $found }
+    $pidFile = Join-Path $stateDir 'nudge-scan.pid'
+    if (Test-Path $pidFile) {
+        try {
+            $daemonPid = [int](Get-Content $pidFile -Raw).Trim()
+            if (Get-Process -Id $daemonPid -ErrorAction SilentlyContinue) {
+                return @([pscustomobject]@{ ProcessId = $daemonPid })
+            }
+        } catch {}
+    }
+    return @()
 }
 function Write-GuardLog([string]$text) {
     Add-Content -Path $guardLog -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' | ' + $text) -Encoding UTF8
 }
 $now = Get-Date
-$before = Find-Daemon
+$before = @(Find-Daemon)
 $beforePid = if ($before.Count -gt 0) { [int]$before[0].ProcessId } else { $null }
 $latest = Get-ChildItem $logDir -Filter 'nudge-scan-*.log' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $logAge = if ($latest) { [int]($now - $latest.LastWriteTime).TotalSeconds } else { $null }
@@ -44,7 +55,7 @@ if ($beforePid) {
         Write-GuardLog 'DAEMON-DOWN action=backoff delay=120'
     }
 }
-$after = Find-Daemon
+$after = @(Find-Daemon)
 $afterPid = if ($after.Count -gt 0) { [int]$after[0].ProcessId } else { $null }
 $latestAfter = Get-ChildItem $logDir -Filter 'nudge-scan-*.log' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $record = [ordered]@{
