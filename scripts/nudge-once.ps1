@@ -6,10 +6,10 @@
 param(
   [Parameter(Mandatory = $true)][string]$To,
   [int]$ReadyTimeoutSec = 40,
-  [string]$CdpPort = '9222',
   [switch]$Reload,
   [int]$DelaySec = 0
 )
+$CdpPort = '9222'
 # reload по умолчанию ВЫКЛЮЧЕН: 16.10 чат «Тест» — дважды Page.reload убил renderer
 # (прогон 1: CHECK-IDLE 40 с тишины; прогон 2: WS ReceiveAsync умер на 90 с).
 # -Reload включает штатный reload; скрипт FAIL-SAFE при краше (TAB-CRASH detect).

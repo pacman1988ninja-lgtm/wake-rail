@@ -1,5 +1,5 @@
 ﻿#И-98: nudge-scan.ps1 - автопродление сессий по триггеру "Стоп по бюджету".
-# Цикл: page-вкладки CDP 9222/9223/9224; порт контура сохраняется с каждой вкладкой.
+# Цикл: все page-вкладки одного окна CDP 9222.
 # Триггер: 'Стоп по бюджету', маркер не обработан. Один маркер = один адресат.
 # Действие: отдельный nudge-once.ps1 на порту контура; bringToFront + insertText + клик,
 # RESULT=DELIVERED только по росту пользовательских сообщений.
@@ -16,7 +16,6 @@
 # бэклог не догоняем. UID budilnik-postanovka-/budilnik-verdict-<comment_id>.
 param(
   [int]$PollSec = 45,
-  [string]$CdpPort = '9222',
   [int]$StopTtlSec = 1800,  # И-129: порог "просрочен" >= 30 мин от первого детекта (было 900 с)
   [switch]$DetectOnly,  # И-103: сухой прогон - только детект и лог
   [switch]$Once        # И-103: один цикл и выход (для теста)
@@ -35,23 +34,12 @@ function L([string]$s) { $line = (Get-Date -Format 'HH:mm:ss') + ' | ' + $s; Add
 $markers = @{}
 if (Test-Path $markerFile) { try { $markers = ConvertFrom-Json ([IO.File]::ReadAllText($markerFile)) -AsHashtable } catch { $markers = @{} } }
 function Save-Markers { [IO.File]::WriteAllText($markerFile, ($markers | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false))) }
-function Get-ExpectedCdpPort([string]$sessionName) {
-  if ($sessionName -match '/Б24/') { return '9223' }
-  if ($sessionName -match '/ЧЗ/') { return '9224' }
-  return '9222'
-}
-function Get-AllCdpTabs {
-  $all = @()
-  foreach ($port in @('9222', '9223', '9224')) {
-    try {
-      $items = Invoke-RestMethod -UseBasicParsing -Uri ('http://127.0.0.1:' + $port + '/json/list') -TimeoutSec 10
-      foreach ($item in @($items)) {
-        $item | Add-Member -NotePropertyName 'cdp_port' -NotePropertyValue $port -Force
-        $all += $item
-      }
-    } catch { L ('CDP-ERR port=' + $port + ' ' + $_.Exception.Message) }
-  }
-  return $all
+function Get-CdpTabs {
+  try {
+    $items = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:9222/json/list' -TimeoutSec 10
+    foreach ($item in @($items)) { $item | Add-Member -NotePropertyName 'cdp_port' -NotePropertyValue '9222' -Force }
+    return @($items)
+  } catch { L ('CDP-ERR port=9222 ' + $_.Exception.Message); return @() }
 }
 # === И-104.2: детект сдачи (перенос из budilnik-sessii.ps1; тик 2 мин -> цикл демона 45-65 с) ===
 # Функции Get-SdachaDem/Send-SdachaPutDem/Send-SdachaCommentDem - точные копии боевых
@@ -315,7 +303,7 @@ function Invoke-TriggerRegistryDem([object]$BudCfg) {
             L 'TRIGGER: ключ triggers отсутствует или пуст — заморожено (И-163, без молчаливого legacy)'
             return
         }
-        $tabsT = Get-AllCdpTabs
+        $tabsT = Get-CdpTabs
         $stT = Read-TrigState
         $changed = $false
         foreach ($prop in $trg.PSObject.Properties) {
@@ -662,7 +650,7 @@ trap { $script:trapCount++; L ('И-169.7 TRAP: ' + $_.Exception.Message); if ($s
 while ($true) {
   try {
     try { Invoke-SdachaScanDem } catch { L ('И-104.2 ERR ' + $_.Exception.Message) }
-    $tabs = Get-AllCdpTabs
+    $tabs = Get-CdpTabs
     # === И-168: КАРАНТИН + ТРИПВАЙР челлендж-доменов ===
     $quar = $false
     try { $quar = [bool]$budCfg.quarantine } catch { }
@@ -673,7 +661,7 @@ while ($true) {
     }
     # Трипвайр: вкладка с челлендж-доменом -> полный стоп
     $tabsT = $null
-    try { $tabsT = Get-AllCdpTabs } catch { }
+    try { $tabsT = Get-CdpTabs } catch { }
     if ($tabsT) {
         $bad = $null
         foreach ($tb in $tabsT) {
@@ -719,10 +707,8 @@ while ($true) {
       # И-101: только чат-вкладки Kimi (URL kimi.ai/chat или title " - Kimi"); прочие - молча
       if (($tab.url + '') -notmatch 'kimi\.ai/chat' -and ($tab.title + '') -notmatch ' - Kimi$') { continue }
       $sessN = (($tab.title + '') -replace ' - Kimi$','').Trim()
-      $expectedPort = Get-ExpectedCdpPort $sessN
-      $actualPort = [string]$tab.cdp_port
-      if ($actualPort -ne $expectedPort) { L ($sessN + ' | DEDUP-SKIP wrong-port=' + $actualPort + ' expected=' + $expectedPort); continue }
-      if ($seenSessionPorts.ContainsKey($sessN)) { L ($sessN + ' | DEDUP-SKIP duplicate-window port=' + $actualPort); continue }
+      $actualPort = '9222'
+      if ($seenSessionPorts.ContainsKey($sessN)) { L ($sessN + ' | DEDUP-SKIP duplicate-window port=9222'); continue }
       $seenSessionPorts[$sessN] = $actualPort
       $sEntry = Get-SessEntry $sessN
       if ($sEntry -and -not [bool]$sEntry.enabled) {
@@ -797,9 +783,9 @@ while ($true) {
             L ($short + ' | DETECT-ONLY: стоп найден, толчок не выполнялся')
           } else {
             Start-Sleep -Seconds (Get-Random -Minimum 0 -Maximum 11)  # И-103.3: джиттер отправки толчка 0..10 с
-            $nudgePort = if ($tab.cdp_port) { [string]$tab.cdp_port } else { Get-ExpectedCdpPort $sess }
-            L ($short + ' | NUDGE-TARGET cdp_port=' + $nudgePort + ' КЛЮЧ=' + $fp)
-            $nudgeOut = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\kimi-work\wake-rail\scripts\nudge-once.ps1' -To ([string]$tab.title) -CdpPort $nudgePort -DelaySec 0 *>&1
+            $nudgePort = '9222'
+            L ($short + ' | NUDGE-TARGET cdp_port=9222 КЛЮЧ=' + $fp)
+            $nudgeOut = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\kimi-work\wake-rail\scripts\nudge-once.ps1' -To ([string]$tab.title) -DelaySec 0 *>&1
             $nudgeText = (($nudgeOut | ForEach-Object { $_.ToString() }) -join "`n")
             $res = 'FAILED'
             if ($nudgeText -match 'RESULT=DELIVERED') { $res = 'DELIVERED' }

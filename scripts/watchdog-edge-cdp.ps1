@@ -6,9 +6,7 @@ $logDir = 'C:\kimi-work\wake-rail\logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logFile = Join-Path $logDir 'watchdog-edge-cdp.log'
 $instances = @(
-    [ordered]@{ port = '9222'; profile = 'C:\kimi-work\wake-rail\cdp-profile'; url = 'https://www.kimi.ai/chat/1a171ebd-4a32-8926-8000-09502d436107?chat_enter_method=history' },
-    [ordered]@{ port = '9223'; profile = 'C:\kimi-work\wake-rail\cdp-profile-b24'; url = 'https://www.kimi.ai/chat/1a1b4a1f-8dd2-8782-8000-0950f3b2e3ba?chat_enter_method=history' },
-    [ordered]@{ port = '9224'; profile = 'C:\kimi-work\wake-rail\cdp-profile-chz'; url = 'https://www.kimi.ai/chat/1a1af74f-80e2-8207-8000-0950824703f5?chat_enter_method=history' }
+    [ordered]@{ port = '9222'; profile = 'C:\kimi-work\wake-rail\cdp-profile'; url = 'https://www.kimi.ai/chat/1a171ebd-4a32-8926-8000-09502d436107?chat_enter_method=history' }
 )
 $nextAttempt = @{}
 $backoffSec = @{}
@@ -70,6 +68,7 @@ function Ensure-Instance($item) {
         '--user-data-dir=' + $item.profile,
         '--no-first-run',
         '--no-default-browser-check',
+        '--start-minimized',
         'about:blank'
     )
     $up = $false
