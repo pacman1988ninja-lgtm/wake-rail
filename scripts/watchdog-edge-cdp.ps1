@@ -10,6 +10,8 @@ $instances = @(
     [ordered]@{ port = '9223'; profile = 'C:\kimi-work\wake-rail\cdp-profile-b24'; url = 'https://www.kimi.ai/chat/1a1b4a1f-8dd2-8782-8000-0950f3b2e3ba?chat_enter_method=history' },
     [ordered]@{ port = '9224'; profile = 'C:\kimi-work\wake-rail\cdp-profile-chz'; url = 'https://www.kimi.ai/chat/1a1af74f-80e2-8207-8000-0950824703f5?chat_enter_method=history' }
 )
+$nextAttempt = @{}
+$backoffSec = @{}
 function Write-Log([string]$message) {
     Add-Content -Path $logFile -Value ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' | ' + $message) -Encoding UTF8
 }
@@ -19,9 +21,37 @@ function Test-Cdp([string]$port) {
         return [bool]$v.Browser
     } catch { return $false }
 }
+function New-ChatTarget([string]$port, [string]$url) {
+    $ver = Invoke-RestMethod -UseBasicParsing -Uri ('http://127.0.0.1:' + $port + '/json/version') -TimeoutSec 5
+    $ws = New-Object System.Net.WebSockets.ClientWebSocket
+    $cts = New-Object Threading.CancellationTokenSource(10000)
+    try {
+        $ws.ConnectAsync([Uri]$ver.webSocketDebuggerUrl, $cts.Token).Wait()
+        $msg = @{ id = 1; method = 'Target.createTarget'; params = @{ url = $url } } | ConvertTo-Json -Compress
+        $bytes = [Text.Encoding]::UTF8.GetBytes($msg)
+        $ws.SendAsync((New-Object ArraySegment[byte] -ArgumentList @(,$bytes)), [Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).Wait()
+        $buf = New-Object byte[] 65536
+        $ms = New-Object IO.MemoryStream
+        do {
+            $res = $ws.ReceiveAsync((New-Object ArraySegment[byte] -ArgumentList @(,$buf)), $cts.Token).Result
+            $ms.Write($buf, 0, $res.Count)
+        } while (-not $res.EndOfMessage)
+        $answer = ConvertFrom-Json ([Text.Encoding]::UTF8.GetString($ms.ToArray()))
+        if (-not $answer.result.targetId) { throw 'Target.createTarget returned no targetId' }
+        return [string]$answer.result.targetId
+    } finally {
+        $ws.Dispose()
+        $cts.Dispose()
+    }
+}
 function Ensure-Instance($item) {
     $port = [string]$item.port
-    if (Test-Cdp $port) { Write-Log ('OK port=' + $port); return }
+    if (Test-Cdp $port) {
+        $backoffSec[$port] = 0
+        $nextAttempt[$port] = [datetime]::MinValue
+        Write-Log ('OK port=' + $port)
+        return
+    }
     $root = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object {
         $_.CommandLine -match ('--remote-debugging-port=' + $port + '(\s|$)') -and $_.CommandLine -notmatch '--type='
     })
@@ -29,13 +59,18 @@ function Ensure-Instance($item) {
         Write-Log ('STALE-NO-KILL port=' + $port + ' pid=' + $root[0].ProcessId)
         return
     }
-    Write-Log ('START-BEFORE port=' + $port + ' cdp=closed profile=' + $item.profile)
+    $now = Get-Date
+    if ($nextAttempt.ContainsKey($port) -and $now -lt $nextAttempt[$port]) {
+        Write-Log ('BACKOFF port=' + $port + ' retry_in_sec=' + [int]($nextAttempt[$port] - $now).TotalSeconds)
+        return
+    }
+    Write-Log ('START-BEFORE port=' + $port + ' cdp=closed process=absent profile=' + $item.profile)
     Start-Process -FilePath $edge -ArgumentList @(
         '--remote-debugging-port=' + $port,
         '--user-data-dir=' + $item.profile,
         '--no-first-run',
         '--no-default-browser-check',
-        $item.url
+        'about:blank'
     )
     $up = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -47,6 +82,22 @@ function Ensure-Instance($item) {
     })
     $pidText = if ($rootAfter.Count -gt 0) { [string]$rootAfter[0].ProcessId } else { 'none' }
     Write-Log ('START-AFTER port=' + $port + ' cdp=' + $(if ($up) { 'open' } else { 'closed' }) + ' pid=' + $pidText)
+    if ($up) {
+        $backoffSec[$port] = 0
+        $nextAttempt[$port] = [datetime]::MinValue
+        try {
+            $targetId = New-ChatTarget $port ([string]$item.url)
+            Write-Log ('CHAT-TARGET port=' + $port + ' target=' + $targetId + ' url=' + $item.url)
+        } catch {
+            Write-Log ('CHAT-TARGET-ERR port=' + $port + ' error=' + $_.Exception.Message)
+        }
+    } else {
+        $previous = if ($backoffSec.ContainsKey($port)) { [int]$backoffSec[$port] } else { 0 }
+        $delay = if ($previous -le 0) { 30 } else { [Math]::Min(300, $previous * 2) }
+        $backoffSec[$port] = $delay
+        $nextAttempt[$port] = (Get-Date).AddSeconds($delay)
+        Write-Log ('START-BACKOFF port=' + $port + ' delay_sec=' + $delay)
+    }
 }
 do {
     foreach ($item in $instances) { Ensure-Instance $item }
