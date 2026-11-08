@@ -5,3 +5,6 @@ scripts/*
 !scripts/nudge-once.ps1
 !scripts/watchdog-edge-cdp.ps1
 !scripts/install-edge-cdp-watchdog.ps1
+!scripts/nudge-scan.ps1
+!scripts/watchdog-nudge-scan-task.ps1
+!scripts/install-nudge-scan-watchdog.ps1
