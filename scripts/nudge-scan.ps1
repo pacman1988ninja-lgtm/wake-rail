@@ -540,6 +540,10 @@ function Invoke-SdachaScanDem {
                 $kSeen++
                 $verb = 'поставлен'
                 if ($kind -eq 'verdict') { $verb = 'вердикт подписан' }
+                if ($DetectOnly) {
+                    L ('DETECT-ONLY ' + $kind + ': order=' + $det.Order + ' comment=' + $cid + '; push skipped')
+                    continue
+                }
                 try {
                     Send-KindPushDem -CaldavCfg $ccfg -Kind $kind -Text ('{0} / {1} / {2}' -f $det.Order, $verb, $det.Who) -CommentId $cid
                     $kst.pushed = @(@($kst.pushed) + $cid | Select-Object -Unique)
@@ -636,11 +640,15 @@ try {
     if (Get-Process -Id $oldD -ErrorAction SilentlyContinue) {
       $freshD = $false
       try { $lgD = Get-ChildItem $logDir -Filter 'nudge-scan-*.log' | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($lgD -and ((Get-Date) - $lgD.LastWriteTime).TotalSeconds -lt 90) { $freshD = $true } } catch { }
-      if ($freshD) { L ('И-170: already running pid=' + $oldD + ' - выход'); exit 0 }
+      if ($freshD -and -not $DetectOnly) { L ('И-170: already running pid=' + $oldD + ' - выход'); exit 0 }
     }
   }
-  [IO.File]::WriteAllText($script:daemonPidFile, [string]$PID, (New-Object Text.UTF8Encoding $false))
-  L ('И-170: pid-file записан pid=' + $PID)
+  if ($DetectOnly) {
+    L 'DETECT-ONLY: daemon pid-file unchanged'
+  } else {
+    [IO.File]::WriteAllText($script:daemonPidFile, [string]$PID, (New-Object Text.UTF8Encoding $false))
+    L ('И-170: pid-file записан pid=' + $PID)
+  }
 } catch { L ('И-170 PID-FILE ERR: ' + $_.Exception.Message) }
 
 # И-169.7: страховка «exception не гасит демон» - глобальный trap с анти-зацикливанием
