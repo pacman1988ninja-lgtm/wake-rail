@@ -76,9 +76,7 @@ try {
   L ("TAB: [" + $tab.title + "] url=" + $tab.url)
   $att = Send-Cmd 'Target.attachToTarget' @{ targetId = $tab.id; flatten = $true } $null
   $sid = $att.result.sessionId
-  [void](Send-Cmd 'Page.bringToFront' @{} $sid)
-  Start-Sleep -Milliseconds 900
-  L 'FRONT: tab activated'
+  L 'BACKGROUND: tab activation not requested'
   [void](Send-Cmd 'Page.enable' @{} $sid)
   [void](Send-Cmd 'Runtime.enable' @{} $sid)
   if ($Reload) { L 'RELOAD: штатный (-Reload)'; [void](Send-Cmd 'Page.reload' @{ ignoreCache = $false } $sid) }
