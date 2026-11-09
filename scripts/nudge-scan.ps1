@@ -32,7 +32,12 @@ $logFile = Get-ScanLogFile
 $markerFile = Join-Path $stateDir 'nudge-scan.markers.json'
 function L([string]$s) { $line = (Get-Date -Format 'HH:mm:ss') + ' | ' + $s; Add-Content -Path (Get-ScanLogFile) -Value $line -Encoding UTF8 }
 $markers = @{}
-if (Test-Path $markerFile) { try { $markers = ConvertFrom-Json ([IO.File]::ReadAllText($markerFile)) -AsHashtable } catch { $markers = @{} } }
+if (Test-Path $markerFile) {
+  try {
+    $markerObj = ConvertFrom-Json ([IO.File]::ReadAllText($markerFile))
+    foreach ($markerProp in $markerObj.PSObject.Properties) { $markers[$markerProp.Name] = $markerProp.Value }
+  } catch { $markers = @{} }
+}
 function Save-Markers { [IO.File]::WriteAllText($markerFile, ($markers | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false))) }
 function Get-CdpTabs {
   try {
