@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 DB_PATH = os.environ.get("KIMI_ORDERS_DB", "C:/kimi-work/dispatcher-limited/orders.db")
+TARGET_OVERRIDE = os.environ.get("KIMI_ORDERS_TARGET_OVERRIDE", "")
 KINDS = ("assign", "accepted-defer", "accepted-final", "finalize", "rework", "verdict")
 
 
@@ -45,7 +46,7 @@ def read_events():
             "decision_no": decision_no,
             "created_ts": created_ts,
             "contour": (assignee or "").split("/")[1] if "/" in (assignee or "") else "",
-            "target_title": target_for(assignee),
+            "target_title": TARGET_OVERRIDE or target_for(assignee),
         })
     return events
 

@@ -673,12 +673,13 @@ function Read-OrderTriggerState([string]$Path) {
       if ($st -and $st.PSObject.Properties['sent']) { return $st }
     } catch { }
   }
-  return [pscustomobject]@{ primed = $false; sent = [pscustomobject]@{} }
+  return [pscustomobject]@{ primed = $false; sent = [pscustomobject]@{}; blocked = [pscustomobject]@{} }
 }
 function Invoke-OrderTriggerDem {
   $statePath = Join-Path $stateDir 'nudge-scan.order-triggers.json'
   $helper = 'C:\kimi-work\wake-rail\scripts\orders-events.py'
   $st = Read-OrderTriggerState $statePath
+  if (-not $st.PSObject.Properties['blocked']) { $st | Add-Member -NotePropertyName 'blocked' -NotePropertyValue ([pscustomobject]@{}) }
   try {
     $raw = (& python $helper 2>$null | Out-String)
     if ($LASTEXITCODE -ne 0) { L 'ORDER-TRIGGER ERR helper exit=' + $LASTEXITCODE; return }
@@ -694,7 +695,7 @@ function Invoke-OrderTriggerDem {
     $tabsO = Get-CdpTabs
     foreach ($ev in $events) {
       $key = [string]$ev.key
-      if (-not $key -or (Get-TrigStateEntry $st.sent $key)) { continue }
+      if (-not $key -or (Get-TrigStateEntry $st.sent $key) -or (Get-TrigStateEntry $st.blocked $key)) { continue }
       $targetTitle = [string]$ev.target_title
       if ($DetectOnly) {
         L ('DETECT-ONLY ORDER-TRIGGER key=' + $key + ' target=' + $targetTitle)
@@ -716,6 +717,10 @@ function Invoke-OrderTriggerDem {
         if ($orderResult -eq 'DELIVERED') {
           Set-TrigStateEntry $st.sent $key ((Get-Date).ToString('o'))
           Save-OrderTriggerState $st $statePath
+        } elseif ($orderNudgeText -match 'SEND: button=CLICKED') {
+          Set-TrigStateEntry $st.blocked $key ((Get-Date).ToString('o'))
+          Save-OrderTriggerState $st $statePath
+          L ('ORDER-TRIGGER UNCERTAIN-NO-RETRY key=' + $key)
         }
       } catch { L ('ORDER-TRIGGER ERR key=' + $key + ' ' + $_.Exception.Message) }
     }
