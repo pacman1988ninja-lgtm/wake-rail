@@ -8,3 +8,10 @@ scripts/*
 !scripts/nudge-scan.ps1
 !scripts/watchdog-nudge-scan-task.ps1
 !scripts/install-nudge-scan-watchdog.ps1
+!scripts/watchdog-nudge-scan.ps1
+!scripts/orders-events.py
+!config/
+config/*
+!config/budilnik.config.example.json
+!config/budilnik.caldav.example.json
+!config/sessions.config.example.json

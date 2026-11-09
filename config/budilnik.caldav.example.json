@@ -1,0 +1,6 @@
+{
+  "caldavLogin": "REPLACE_WITH_CALDAV_LOGIN",
+  "caldavPassword": "REPLACE_WITH_CALDAV_PASSWORD",
+  "calendarUrl": "https://caldav.yandex.ru/calendars/REPLACE_WITH_CALDAV_LOGIN/",
+  "githubToken": "REPLACE_WITH_GITHUB_TOKEN"
+}

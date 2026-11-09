@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 $ErrorActionPreference = 'Continue'
 $dir = 'C:\kimi-work\wake-rail'
 $stateDir = Join-Path $dir 'state'

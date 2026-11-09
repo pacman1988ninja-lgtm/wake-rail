@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param([string]$Evidence = 'C:\kimi-work\artifacts\i306-nudge-watchdog-install.json')
 $ErrorActionPreference = 'Stop'
 $taskName = 'KimiNudgeScanWatchdog'
