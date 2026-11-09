@@ -5,7 +5,7 @@ from pathlib import Path
 
 DB_PATH = os.environ.get("KIMI_ORDERS_DB", "C:/kimi-work/dispatcher-limited/orders.db")
 TARGET_OVERRIDE = os.environ.get("KIMI_ORDERS_TARGET_OVERRIDE", "")
-KINDS = ("assign", "accepted-defer", "accepted-final", "finalize", "rework", "verdict")
+KINDS = ("assign",)
 
 
 def target_for(assignee):
@@ -38,7 +38,7 @@ def read_events():
         db.close()
     events = []
     for order_id, decision_no, decision_kind, created_ts, assignee in rows:
-        kind = "postanovka" if decision_kind == "assign" else "verdict"
+        kind = "postanovka"
         events.append({
             "key": order_id + "|" + kind + "|" + str(decision_no),
             "order_id": order_id,
