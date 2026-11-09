@@ -10,6 +10,7 @@ scripts/*
 !scripts/install-nudge-scan-watchdog.ps1
 !scripts/watchdog-nudge-scan.ps1
 !scripts/orders-events.py
+!scripts/run-hidden-nudge-scan-watchdog.vbs
 !config/
 config/*
 !config/budilnik.config.example.json
