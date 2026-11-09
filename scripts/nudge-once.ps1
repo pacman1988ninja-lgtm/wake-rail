@@ -96,7 +96,7 @@ try {
       if ($errStreak -ge 5) { L ("ERROR: TAB-CRASH suspect (" + $errStreak + " подряд)"); exit 2 }
       continue
     }
-    if ($st -eq 'True' -and $busy -eq 'False') { $ready = $true; L 'CHECK-IDLE: ready'; break }
+    if ($st -eq 'True' -and ($busy -eq $false -or $busy -eq 'False')) { $ready = $true; L 'CHECK-IDLE: ready'; break }
     if ($busy -eq 'True') { L 'CHECK-IDLE: ожидание (генерация/редактор)' }
   }
   if (-not $ready) { L 'ERROR: CHECK-IDLE таймаут'; exit 2 }
