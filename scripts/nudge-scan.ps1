@@ -710,7 +710,16 @@ function Invoke-OrderTriggerDem {
       foreach ($tabO in @($tabsO)) {
         if (($tabO.title + '') -eq $targetTitle) { $targetFound = $true; break }
       }
-      if (-not $targetFound) { L ('ORDER-TRIGGER TARGET-MISSING key=' + $key + ' target=' + $targetTitle); continue }
+      if (-not $targetFound) {
+        # И-315: одна строка на событие (дедуп), а не каждый цикл
+        $mk = 'missing:' + $key
+        if (-not (Get-TrigStateEntry $st.blocked $mk)) {
+          Set-TrigStateEntry $st.blocked $mk ((Get-Date).ToString('o'))
+          Save-OrderTriggerState $st $statePath
+          L ('ORDER-TRIGGER TARGET-MISSING key=' + $key + ' target=' + $targetTitle)
+        }
+        continue
+      }
       try {
         L ('ORDER-TRIGGER NUDGE-START key=' + $key + ' target=' + $targetTitle)
         $orderNudgeOut = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\kimi-work\wake-rail\scripts\nudge-once.ps1' -To $targetTitle -DelaySec 0 *>&1
@@ -814,7 +823,7 @@ while ($true) {
         $script:mid = 0
         # И-103.1: скан стоп-строки по сегментам ассистента (до 8 последних непустых);
         # диагностика КАЖДЫЙ цикл по КАЖДОМУ чату (HARD BLOCK постановки И-103.1).
-        $scanJ = Eval $ws "JSON.stringify((function(){var a=document.querySelectorAll('.segment-assistant');var re=/^Стоп по бюджету \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} \(МСК\)/;var parts=[];for(var i=a.length-1;i>=0&&parts.length<8;i--){var t0=(a[i].innerText||'').trim();if(t0)parts.push(t0)}var ls=parts.join('\n').split(/\n+/);var tailLine=ls.length?ls[ls.length-1].slice(0,50):'';for(var k=0;k<ls.length;k++){var s=ls[k].trim();if(re.test(s))return JSON.stringify({found:s,scanned:a.length,window:parts.length,tailLine:tailLine})}return JSON.stringify({found:'',scanned:a.length,window:parts.length,tailLine:tailLine})})())"
+        $scanJ = Eval $ws "JSON.stringify((function(){var a=document.querySelectorAll('.segment-assistant');var re=/Стоп по бюджету \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} \(МСК\)/;var parts=[];for(var i=a.length-1;i>=0&&parts.length<12;i--){var t0=(a[i].innerText||'').trim();if(t0)parts.push(t0)}var ls=parts.join('\n').split(/\n+/);var tailLine=ls.length?ls[ls.length-1].slice(0,50):'';for(var k=0;k<ls.length;k++){var s=ls[k].trim();if(re.test(s))return JSON.stringify({found:s,scanned:a.length,window:parts.length,tailLine:tailLine})}return JSON.stringify({found:'',scanned:a.length,window:parts.length,tailLine:tailLine})})())"
         $short = ($tab.title + '').Substring(0, [Math]::Min(28, ($tab.title + '').Length))
         $sess = (($tab.title + '') -replace ' - Kimi$','').Trim()
         # И-133.0: метки сессий для лога (карта); прочие - прежний префикс заголовка
