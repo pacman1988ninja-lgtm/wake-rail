@@ -6,8 +6,9 @@ $script = 'C:\kimi-work\wake-rail\scripts\watchdog-nudge-scan-task.ps1'
 $beforeTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $beforeDaemons = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match 'nudge-scan\.ps1' -and $_.CommandLine -notmatch 'watchdog|guard' })
 $before = [ordered]@{ task_exists = [bool]$beforeTask; daemon_pids = @($beforeDaemons | ForEach-Object { $_.ProcessId }) }
-if ($beforeTask) { Export-ScheduledTask -TaskName $taskName | Set-Content -Path 'C:\kimi-work\artifacts\i306-nudge-watchdog-task-backup.xml' -Encoding Unicode }
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $script + '"')
+if ($beforeTask) { Export-ScheduledTask -TaskName $taskName | Set-Content -Path ($Evidence + '.task.xml') -Encoding Unicode }
+$wrapper = 'C:\kimi-work\wake-rail\scripts\run-hidden-nudge-scan-watchdog.vbs'
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $wrapper + '"')
 $startup = New-ScheduledTaskTrigger -AtStartup
 $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
