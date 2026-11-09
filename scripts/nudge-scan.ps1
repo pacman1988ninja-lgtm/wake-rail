@@ -656,7 +656,7 @@ $script:trapCount = 0
 trap { $script:trapCount++; L ('И-169.7 TRAP: ' + $_.Exception.Message); if ($script:trapCount -gt 50) { L 'И-169.7 TRAP-LIMIT: 50 подряд - выход'; exit 1 }; continue }
 
 # I-311: order decisions -> contour nudge; DetectOnly logs without sending.
-function Save-OrderTriggerState([hashtable]$St, [string]$Path) {
+function Save-OrderTriggerState([object]$St, [string]$Path) {
   $tmp = $Path + '.tmp'
   [IO.File]::WriteAllText($tmp, ($St | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
   Move-Item -Path $tmp -Destination $Path -Force
@@ -664,11 +664,11 @@ function Save-OrderTriggerState([hashtable]$St, [string]$Path) {
 function Read-OrderTriggerState([string]$Path) {
   if (Test-Path $Path) {
     try {
-      $st = ConvertFrom-Json ([IO.File]::ReadAllText($Path)) -AsHashtable
-      if ($st -is [hashtable] -and $st.ContainsKey('sent') -and $st.sent -is [hashtable]) { return $st }
+      $st = Get-Content $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+      if ($st -and $st.PSObject.Properties['sent']) { return $st }
     } catch { }
   }
-  return @{ primed = $false; sent = @{} }
+  return [pscustomobject]@{ primed = $false; sent = [pscustomobject]@{} }
 }
 function Invoke-OrderTriggerDem {
   $statePath = Join-Path $stateDir 'nudge-scan.order-triggers.json'
@@ -677,10 +677,10 @@ function Invoke-OrderTriggerDem {
   try {
     $raw = (& python $helper 2>$null | Out-String)
     if ($LASTEXITCODE -ne 0) { L 'ORDER-TRIGGER ERR helper exit=' + $LASTEXITCODE; return }
-    $events = @($raw.Trim() | ConvertFrom-Json)
+    $events = $raw.Trim() | ConvertFrom-Json
     if (-not $st.primed) {
       if ($DetectOnly) { L ('DETECT-ONLY ORDER-TRIGGER PRIME events=' + @($events).Count + ' sends=0'); return }
-      foreach ($ev in $events) { $st.sent[[string]$ev.key] = (Get-Date).ToString('o') }
+      foreach ($ev in $events) { Set-TrigStateEntry $st.sent ([string]$ev.key) ((Get-Date).ToString('o')) }
       $st.primed = $true
       Save-OrderTriggerState $st $statePath
       L ('ORDER-TRIGGER PRIME events=' + @($events).Count + ' sends=0')
@@ -689,7 +689,7 @@ function Invoke-OrderTriggerDem {
     $tabsO = Get-CdpTabs
     foreach ($ev in $events) {
       $key = [string]$ev.key
-      if (-not $key -or $st.sent.ContainsKey($key)) { continue }
+      if (-not $key -or (Get-TrigStateEntry $st.sent $key)) { continue }
       $targetTitle = [string]$ev.target_title
       if ($DetectOnly) {
         L ('DETECT-ONLY ORDER-TRIGGER key=' + $key + ' target=' + $targetTitle)
@@ -709,7 +709,7 @@ function Invoke-OrderTriggerDem {
         if ($orderNudgeText -match 'RESULT=DELIVERED') { $orderResult = 'DELIVERED' }
         L ('ORDER-TRIGGER NUDGE-END key=' + $key + ' RESULT=' + $orderResult)
         if ($orderResult -eq 'DELIVERED') {
-          $st.sent[$key] = (Get-Date).ToString('o')
+          Set-TrigStateEntry $st.sent $key ((Get-Date).ToString('o'))
           Save-OrderTriggerState $st $statePath
         }
       } catch { L ('ORDER-TRIGGER ERR key=' + $key + ' ' + $_.Exception.Message) }
