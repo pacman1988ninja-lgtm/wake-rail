@@ -35,7 +35,11 @@ $markers = @{}
 if (Test-Path $markerFile) {
   try {
     $markerObj = ConvertFrom-Json ([IO.File]::ReadAllText($markerFile))
-    foreach ($markerProp in $markerObj.PSObject.Properties) { $markers[$markerProp.Name] = $markerProp.Value }
+    foreach ($markerProp in $markerObj.PSObject.Properties) {
+      $markerValue = @{}
+      foreach ($valueProp in $markerProp.Value.PSObject.Properties) { $markerValue[$valueProp.Name] = $valueProp.Value }
+      $markers[$markerProp.Name] = $markerValue
+    }
   } catch { $markers = @{} }
 }
 function Save-Markers { [IO.File]::WriteAllText($markerFile, ($markers | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false))) }
