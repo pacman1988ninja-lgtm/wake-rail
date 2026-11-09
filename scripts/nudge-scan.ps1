@@ -655,6 +655,68 @@ try {
 $script:trapCount = 0
 trap { $script:trapCount++; L ('И-169.7 TRAP: ' + $_.Exception.Message); if ($script:trapCount -gt 50) { L 'И-169.7 TRAP-LIMIT: 50 подряд - выход'; exit 1 }; continue }
 
+# I-311: order decisions -> contour nudge; DetectOnly logs without sending.
+function Save-OrderTriggerState([hashtable]$St, [string]$Path) {
+  $tmp = $Path + '.tmp'
+  [IO.File]::WriteAllText($tmp, ($St | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
+  Move-Item -Path $tmp -Destination $Path -Force
+}
+function Read-OrderTriggerState([string]$Path) {
+  if (Test-Path $Path) {
+    try {
+      $st = ConvertFrom-Json ([IO.File]::ReadAllText($Path)) -AsHashtable
+      if ($st -is [hashtable] -and $st.ContainsKey('sent') -and $st.sent -is [hashtable]) { return $st }
+    } catch { }
+  }
+  return @{ primed = $false; sent = @{} }
+}
+function Invoke-OrderTriggerDem {
+  $statePath = Join-Path $stateDir 'nudge-scan.order-triggers.json'
+  $helper = 'C:\kimi-work\wake-rail\scripts\orders-events.py'
+  $st = Read-OrderTriggerState $statePath
+  try {
+    $raw = (& python $helper 2>$null | Out-String)
+    if ($LASTEXITCODE -ne 0) { L 'ORDER-TRIGGER ERR helper exit=' + $LASTEXITCODE; return }
+    $events = @($raw.Trim() | ConvertFrom-Json)
+    if (-not $st.primed) {
+      if ($DetectOnly) { L ('DETECT-ONLY ORDER-TRIGGER PRIME events=' + @($events).Count + ' sends=0'); return }
+      foreach ($ev in $events) { $st.sent[[string]$ev.key] = (Get-Date).ToString('o') }
+      $st.primed = $true
+      Save-OrderTriggerState $st $statePath
+      L ('ORDER-TRIGGER PRIME events=' + @($events).Count + ' sends=0')
+      return
+    }
+    $tabsO = Get-CdpTabs
+    foreach ($ev in $events) {
+      $key = [string]$ev.key
+      if (-not $key -or $st.sent.ContainsKey($key)) { continue }
+      $targetTitle = [string]$ev.target_title
+      if ($DetectOnly) {
+        L ('DETECT-ONLY ORDER-TRIGGER key=' + $key + ' target=' + $targetTitle)
+        continue
+      }
+      if (-not $targetTitle) { L ('ORDER-TRIGGER TARGET-UNMAPPED key=' + $key); continue }
+      $targetFound = $false
+      foreach ($tabO in @($tabsO)) {
+        if (($tabO.title + '') -eq $targetTitle) { $targetFound = $true; break }
+      }
+      if (-not $targetFound) { L ('ORDER-TRIGGER TARGET-MISSING key=' + $key + ' target=' + $targetTitle); continue }
+      try {
+        L ('ORDER-TRIGGER NUDGE-START key=' + $key + ' target=' + $targetTitle)
+        $orderNudgeOut = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\kimi-work\wake-rail\scripts\nudge-once.ps1' -To $targetTitle -DelaySec 0 *>&1
+        $orderNudgeText = (($orderNudgeOut | ForEach-Object { $_.ToString() }) -join "`n")
+        $orderResult = 'FAILED'
+        if ($orderNudgeText -match 'RESULT=DELIVERED') { $orderResult = 'DELIVERED' }
+        L ('ORDER-TRIGGER NUDGE-END key=' + $key + ' RESULT=' + $orderResult)
+        if ($orderResult -eq 'DELIVERED') {
+          $st.sent[$key] = (Get-Date).ToString('o')
+          Save-OrderTriggerState $st $statePath
+        }
+      } catch { L ('ORDER-TRIGGER ERR key=' + $key + ' ' + $_.Exception.Message) }
+    }
+  } catch { L ('ORDER-TRIGGER ERR ' + $_.Exception.Message) }
+}
+
 while ($true) {
   try {
     try { Invoke-SdachaScanDem } catch { L ('И-104.2 ERR ' + $_.Exception.Message) }
@@ -696,6 +758,7 @@ while ($true) {
         $hh = [int](Get-Date -Format 'HH')
         if ($hh -ge 0 -and $hh -lt 7) { continue }
     }
+    try { Invoke-OrderTriggerDem } catch { L ('ORDER-TRIGGER ERR ' + $_.Exception.Message) }
     Load-SessCfg
     $snap = @()
     foreach ($tb in $tabs) {

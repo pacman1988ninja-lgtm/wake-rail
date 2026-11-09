@@ -1,0 +1,24 @@
+{
+  "githubOrg": "pacman1988ninja-lgtm",
+  "githubToken": "REPLACE_WITH_GITHUB_TOKEN",
+  "caldavLogin": "REPLACE_WITH_CALDAV_LOGIN",
+  "caldavPassword": "REPLACE_WITH_CALDAV_PASSWORD",
+  "calendarUrl": "https://caldav.yandex.ru/calendars/REPLACE_WITH_CALDAV_LOGIN/",
+  "nightFreeze": true,
+  "quarantine": false,
+  "contours": [
+    { "repo": "infra", "issue": 1 },
+    { "repo": "Bistro24", "issue": 11 },
+    { "repo": "chz-usluga", "issue": 1 }
+  ],
+  "triggers": {
+    "stop-budget-auto": {
+      "type": "stop-budget",
+      "tab": "*",
+      "pattern": "(builtin)",
+      "enabled": true,
+      "managed": true,
+      "action": { "kind": "nudge", "payload": "1" }
+    }
+  }
+}

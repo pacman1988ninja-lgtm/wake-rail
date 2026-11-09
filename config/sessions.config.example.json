@@ -1,0 +1,15 @@
+{
+  "sessions": [
+    {
+      "match": "Кими/Б24/Исполнитель/Web",
+      "enabled": true,
+      "triggers": [
+        {
+          "id": "stop-budget",
+          "condition": { "type": "stop-line" },
+          "action": { "type": "nudge" }
+        }
+      ]
+    }
+  ]
+}
