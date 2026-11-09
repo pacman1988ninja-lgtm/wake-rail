@@ -10,10 +10,8 @@
 # Дедуп: маркер-файл state\nudge-scan.markers.json (вкладка -> fp/first/processed);
 # сброс маркера, когда стоп исчез. Гарды: вкладки без стопа не трогаем; индикаторы
 # ветвления -> пропуск; BOM обязателен; без createTarget; КК нет. Самотолчок НЕ взводит.
-# И-143 (18.10): детекторы "постановка" и "вердикт" - пуши председателю о новых постановках
-# и подписаниях. Тот же прогон и залы, что сдача (И-104.2), свои state-файлы
-# (nudge-scan.postanovka.json / nudge-scan.verdict.json); since = момент деплоя -
-# бэклог не догоняем. UID budilnik-postanovka-/budilnik-verdict-<comment_id>.
+# I-316: hall nudges are assign-only; verdict/sign never initiates a tab nudge.
+# Only nudge-scan.postanovka.json is read; the legacy verdict state remains unused.
 param(
   [int]$PollSec = 45,
   [int]$StopTtlSec = 1800,  # И-129: порог "просрочен" >= 30 мин от первого детекта (было 900 с)
@@ -532,8 +530,8 @@ function Invoke-SdachaScanDem {
         # И-147: тела свежих комментариев - для триггеров hall-substring
         $script:lastHallBodies = @()
         foreach ($cmH in $fresh) { $script:lastHallBodies += [pscustomobject]@{ id = [string]$cmH.id; body = [string]$cmH.body } }
-        # === И-143: постановка/вердикт - те же $fresh, свои state-файлы, since=деплой ===
-        foreach ($kind in @('postanovka','verdict')) {
+        # I-316: only assign/postanovka may initiate a nudge.
+        foreach ($kind in @('postanovka')) {
             $kindPath = Join-Path $stateDir ('nudge-scan.' + $kind + '.json')
             $kst = Read-KindState $kindPath
             try { $ksince = [datetime]::Parse([string]$kst.since, $null, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $ksince = (Get-Date).ToUniversalTime() }
