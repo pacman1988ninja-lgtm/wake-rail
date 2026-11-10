@@ -582,7 +582,13 @@ function Eval([System.Net.WebSockets.ClientWebSocket]$ws, [string]$expr) {
       $ms = New-Object IO.MemoryStream
       do { $r = $ws.ReceiveAsync((New-Object ArraySegment[byte] -ArgumentList @(,$buf)), $cts.Token).Result; $ms.Write($buf, 0, $r.Count) } while (-not $r.EndOfMessage)
       $o = $ser.DeserializeObject([Text.Encoding]::UTF8.GetString($ms.ToArray()))
-      if ($o -and $o.ContainsKey('id') -and $o['id'] -eq $script:mid) { return $o['result']['result'].value }
+      if ($o -and $o.ContainsKey('id') -and $o['id'] -eq $script:mid) {
+        if ($o.ContainsKey('result') -and $null -ne $o['result'] -and $o['result'].ContainsKey('result')) {
+        $v = $o['result']['result'].value
+        return $v
+      }
+        return $null
+      }
     }
   } finally { $cts.Dispose() }
 }
@@ -821,7 +827,7 @@ while ($true) {
         $script:mid = 0
         # И-103.1: скан стоп-строки по сегментам ассистента (до 8 последних непустых);
         # диагностика КАЖДЫЙ цикл по КАЖДОМУ чату (HARD BLOCK постановки И-103.1).
-        $scanJ = Eval $ws "JSON.stringify((function(){var a=document.querySelectorAll('.segment-assistant');var re=/Стоп по бюджету \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} \(МСК\)/;var parts=[];for(var i=a.length-1;i>=0&&parts.length<12;i--){var t0=(a[i].innerText||'').trim();if(t0)parts.push(t0)}var ls=parts.join('\n').split(/\n+/);var tailLine=ls.length?ls[ls.length-1].slice(0,50):'';for(var k=0;k<ls.length;k++){var s=ls[k].trim();if(re.test(s))return JSON.stringify({found:s,scanned:a.length,window:parts.length,tailLine:tailLine})}return JSON.stringify({found:'',scanned:a.length,window:parts.length,tailLine:tailLine})})())"
+        $scanJ = Eval $ws "JSON.stringify((function(){var a=document.querySelectorAll('.segment-assistant');var re=/Стоп по бюджету \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} \(МСК\)/i /*И-317.1*/;var parts=[];for(var i=a.length-1;i>=0&&parts.length<12;i--){var t0=(a[i].innerText||'').trim();if(t0)parts.push(t0)}var ls=parts.join('\n').split(/\n+/);var tailLine=ls.length?ls[ls.length-1].slice(0,50):'';for(var k=0;k<ls.length;k++){var s=ls[k].trim();if(re.test(s))return JSON.stringify({found:s,scanned:a.length,window:parts.length,tailLine:tailLine})}return JSON.stringify({found:'',scanned:a.length,window:parts.length,tailLine:tailLine})})())"
         $short = ($tab.title + '').Substring(0, [Math]::Min(28, ($tab.title + '').Length))
         $sess = (($tab.title + '') -replace ' - Kimi$','').Trim()
         # И-133.0: метки сессий для лога (карта); прочие - прежний префикс заголовка
@@ -848,14 +854,14 @@ while ($true) {
             if ($mk.StartsWith($sess + '|') -and -not $markers[$mk]['cancelled']) { $markers.Remove($mk); $removed++ }
           }
           if ($removed -gt 0) { Save-Markers; L ($short + ' | РЕЗЮМ: ' + $removed + ' managed-стоп(ов) снято ответом не-стоп') }
-          L ($short + ' | СКАН: cdp_port=' + $actualPort + ' стоп=НЕТ сегментов=' + $scan['scanned'] + ' окно=' + $scan['window'] + ' хвост="' + $scan['tailLine'] + '"')
+          if ($scan) { L ($short + ' | СКАН: cdp_port=' + $actualPort + ' стоп=НЕТ сегментов=' + $scan['scanned'] + ' окно=' + $scan['window'] + ' хвост="' + $scan['tailLine'] + '"') } else { L ($short + ' | СКАН: пустой ответ вкладки (null)') }
           continue
         }
         # стоп найден - метка по событию (sess + текст стопа): новый стоп = новое событие
         $fp = $sess + '|' + $foundLine
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         $m = $markers[$fp]
-        L ($short + ' | СТОП-НАЙДЕН: "' + $foundLine + '" fp=' + $fp + ' state=' + ($m | ConvertTo-Json -Compress -Depth 2))
+        $mJ = '<новый>'; if ($m) { $mJ = ($m | ConvertTo-Json -Compress -Depth 2) }; L ($short + ' | СТОП-НАЙДЕН: "' + $foundLine + '" fp=' + $fp + ' state=' + $mJ)
         # И-169.7.1: managed-стоп — толчки циклом (интервал 5 мин, не чаще) до N=3 без резюма; резюм снимает стоп (ветка -not $isStop)
         if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169.7.1), fire запрещён КЛЮЧ=' + $fp); continue }
         # И-172: одноразовый толчок уже отправлен по этому стопу - повторных не даём (новый стоп = новый fp)
