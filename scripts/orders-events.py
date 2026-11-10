@@ -9,18 +9,13 @@ KINDS = ("assign",)
 
 
 def target_for(assignee):
-    parts = (assignee or "").split("/")
-    if len(parts) < 3:
+    assignee = (assignee or "").strip()
+    if "/Исполнитель/" not in assignee:
         return ""
-    contour = parts[1]
-    if contour == "Инфра":
-        role = "Web-1" if parts[-1] == "Web" else parts[-1]
-        if role in ("Web-1", "Web-2", "Web-3", "Web-4", "КК"):
-            return "Кими/Инфра/Исполнитель/" + role + " - Kimi"
-        return ""
-    if contour in ("Б24", "ЧЗ"):
-        return "Кими/" + contour + "/Исполнитель/Web - Kimi"
-    return ""
+    parts = assignee.split("/")
+    if len(parts) > 1 and parts[1] == "Инфра" and parts[-1] == "Web":
+        assignee = assignee[:-3] + "Web-1"
+    return assignee + " - Kimi"
 
 
 def read_events():

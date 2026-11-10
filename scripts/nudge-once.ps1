@@ -1,6 +1,6 @@
 ﻿# И-95.1: nudge-once.ps1 v3 — одноразовый адресный толчок сессий (single-shot nudge).
-# Протокол: PRE -> reload(опц.) -> CHECK-IDLE -> PRECLEAR -> SNAPSHOT A/MSGS-A
-#           -> composer '1' -> нормализация пробелов -> ОДИН клик -> MSGS-C -> CONFIRM -> CLEANUP.
+# Протокол: PRE -> reload(опц.) -> CHECK-IDLE -> READONLY-EDITOR-GUARD -> SNAPSHOT A/MSGS-A
+#           -> editor guard -> composer '1' -> нормализация пробелов -> ОДИН клик -> MSGS-C -> CONFIRM -> CLEANUP.
 # Гарды: существующая вкладка по заголовку (без createTarget); ОДНА отправка максимум;
 # при неопределённости — стоп без повтора; испытания только на одноразовом тестовом чате; КК не трогаем.
 param(
@@ -102,24 +102,13 @@ try {
   if (-not $ready) { L 'ERROR: CHECK-IDLE таймаут'; exit 2 }
   Start-Sleep -Seconds 3
 
-  # --- PRECLEAR: чистый композер (Backspace-цикл + cut-fallback) ---
-  $pre = ''
-  for ($k = 0; $k -lt 4; $k++) {
-    $pre = Eval "(function(){ var ed = document.querySelector('.chat-input-editor'); if (!ed) return 'NO-EDITOR'; ed.focus(); var s2 = getSelection(); var r2 = document.createRange(); r2.selectNodeContents(ed); s2.removeAllRanges(); s2.addRange(r2); document.execCommand('cut'); } return JSON.stringify({after: ed.innerText, keys: n}); })()" $sid
-    if ($pre -match '\"after\":\"\"') { break }
-    Start-Sleep -Milliseconds 500
-  }
-  L ("PRECLEAR: " + $pre)
-    $preF = Eval "(function(){ var ed=document.querySelector('.chat-input-editor'); if(!ed) return 'NO-EDITOR'; ed.focus(); var s=window.getSelection(); var r=document.createRange(); r.selectNodeContents(ed); s.removeAllRanges(); s.addRange(r); document.execCommand('delete'); ed.dispatchEvent(new Event('input',{bubbles:true})); return JSON.stringify({after:(ed.innerText||'').trim()}); })()" $sid
-    [void](Eval "(function(){ var ed=document.querySelector('.chat-input-editor'); if(ed){ed.focus();} return 'F'; })()" $sid)
-    Start-Sleep -Milliseconds 400
-    [void](Send-Cmd 'Input.dispatchKeyEvent' @{ type = 'keyDown'; key = 'a'; code = 'KeyA'; windowsVirtualKeyCode = 65; nativeVirtualKeyCode = 65; modifiers = 2 } $sid)
-    [void](Send-Cmd 'Input.dispatchKeyEvent' @{ type = 'keyUp'; key = 'a'; code = 'KeyA'; windowsVirtualKeyCode = 65; nativeVirtualKeyCode = 65; modifiers = 2 } $sid)
-    [void](Send-Cmd 'Input.dispatchKeyEvent' @{ type = 'keyDown'; key = 'Backspace'; code = 'Backspace'; windowsVirtualKeyCode = 8; nativeVirtualKeyCode = 8 } $sid)
-    [void](Send-Cmd 'Input.dispatchKeyEvent' @{ type = 'keyUp'; key = 'Backspace'; code = 'Backspace'; windowsVirtualKeyCode = 8; nativeVirtualKeyCode = 8 } $sid)
-    Start-Sleep -Milliseconds 600
-    $preF = Eval "(function(){ var ed=document.querySelector('.chat-input-editor'); return JSON.stringify({after:(ed&&ed.innerText||'').trim()}); })()" $sid
-    L ("PRECLEAR-FORCE: " + $preF)
+  # I-318.2/F3: read-only editor guard; never clear pre-existing text.
+  $pre = Eval "(function(){ var ed = document.querySelector('.chat-input-editor'); if (!ed) return 'NO-EDITOR'; return JSON.stringify({after:(ed.innerText||'').trim()}); })()" $sid
+  if ($pre -eq 'NO-EDITOR') { L 'NO-SEND: editor not found; no cleanup'; exit 3 }
+  $preText = $null
+  try { $preText = ((($pre | ConvertFrom-Json).after) -replace '\s+', '') } catch { $preText = $null }
+  if ($preText) { L ('NO-SEND: editor not empty; no cleanup [' + $preText + ']'); exit 3 }
+  L ('EDITOR-EMPTY: ' + $pre)
 
   # --- И-150: диагностический журнал (серия толчков) ---
   $diagLog = Join-Path $logDir ('i150-diag-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
@@ -140,8 +129,7 @@ try {
   Start-Sleep -Seconds 3
   $m2 = Eval $msgExpr $sid
   if ($m1 -and $m2 -and ($m1 -ne $m2)) {
-    L ("NO-SEND: активность в чате за 3 с — отправка запрещена, cleanup и стоп")
-    [void](Eval "(function(){ var ed = document.querySelector('.chat-input-editor'); if (!ed) return 'NO-EDITOR'; ed.focus(); var r = document.createRange(); r.selectNodeContents(ed); r.deleteContents(); return 'CLEAN'; })()" $sid)
+    L 'NO-SEND: chat activity; editor preserved; no cleanup'
     exit 3
   }
 
@@ -163,6 +151,7 @@ try {
   $edNorm = $null
   try { $edNorm = ((($edNow | ConvertFrom-Json).text) -replace '\s+', '') } catch { $edNorm = $null }
   if ($edNorm -eq '1') {
+    L ('SEND-GUARD: to=[' + $To + '] payload=[1]')
     $btnBefore = Eval "(function(){ var b = document.querySelector('.send-button-container'); return b ? b.className : 'NO-BTN'; })()" $sid
     DL ('SEND-BTN-BEFORE: ' + $btnBefore)
     $clickRes = Eval "(function(){ var b = document.querySelector('.send-button-container'); if (!b) return 'NO-BTN'; if (b.className.indexOf('disabled') >= 0) return 'DISABLED'; b.click(); return 'CLICKED'; })()" $sid
@@ -201,14 +190,16 @@ try {
   $composerNote = ($verdict | Where-Object { $_ -match 'COMPOSER|SENT' }) -join ','
   L ("RESULT=" + $res + " | msgsA=" + $ma.Count + " msgsC=" + $mc.Count + " | composer-comment: " + $composerNote)
 
-  # --- CLEANUP ---
-  $clr = ''
-  for ($k2 = 0; $k2 -lt 4; $k2++) {
-    $clr = Eval "(function(){ var ed = document.querySelector('.chat-input-editor'); if (!ed) return 'NO-EDITOR'; ed.focus(); var s3 = getSelection(); var r3 = document.createRange(); r3.selectNodeContents(ed); s3.removeAllRanges(); s3.addRange(r3); document.execCommand('cut'); } return JSON.stringify({after: ed.innerText, keys: n}); })()" $sid
-    if ($clr -match '\"after\":\"\"') { break }
-    Start-Sleep -Milliseconds 500
+  # I-318.2/F3: cleanup only the exact payload still owned by this operation.
+  $clr = Eval "(function(){ var ed = document.querySelector('.chat-input-editor'); if (!ed) return 'NO-EDITOR'; return JSON.stringify({after:(ed.innerText||'').trim()}); })()" $sid
+  $clrText = $null
+  try { $clrText = (($clr | ConvertFrom-Json).after) } catch { $clrText = $null }
+  if ($clrText -eq '1') {
+    $clr = Eval "(function(){ var ed = document.querySelector('.chat-input-editor'); if (!ed) return 'NO-EDITOR'; ed.focus(); var s = window.getSelection(); var r = document.createRange(); r.selectNodeContents(ed); s.removeAllRanges(); s.addRange(r); document.execCommand('delete'); ed.dispatchEvent(new Event('input',{bubbles:true})); return JSON.stringify({after:(ed.innerText||'').trim()}); })()" $sid
+    L ('CLEANUP: own payload only; ' + $clr)
+  } else {
+    L 'CLEANUP: skipped for empty or foreign editor content'
   }
-  L ("CLEANUP: " + $clr)
   L '=== NUDGE-ONCE v3 end ==='
   exit 0
 } catch {
