@@ -1,7 +1,7 @@
 ﻿#И-98: nudge-scan.ps1 - автопродление сессий по триггеру "Стоп по бюджету".
 # Цикл: все page-вкладки одного окна CDP 9222.
 # Триггер: 'Стоп по бюджету', маркер не обработан. Один маркер = один адресат.
-# Действие: отдельный nudge-once.ps1 на порту контура; bringToFront + insertText + клик,
+# I-318.2: all open CDP pages; no bringToFront, createTarget, or fixed tab list.
 # RESULT=DELIVERED только по росту пользовательских сообщений.
 # И-101 (16.10): через фильтр проходят только чат-вкладки (kimi.ai/chat или title " - Kimi");
 # вкладка-ловушка не останавливает цикл; каждый WS-вызов - с таймаутом ~20 с.
@@ -435,9 +435,8 @@ function Get-HallComments {
 $script:lastSbState = $null
 $script:trigEnState = @{}
 $script:ManagedSeriesMode = $false  # И-172: серия N=3 ВЫКЛЮЧЕНА - один managed-толчок на стоп (код серии сохранён за флагом)
-$script:primeUntil = (Get-Date).AddMinutes(2)
+$script:primeStops = $true
 $script:stopPrimeCount = 0
-$script:primeLogged = $false
 $script:quarCount = 0
 $script:tripFired = $false
 $script:cfgGuardBad = 0
@@ -748,11 +747,6 @@ function Invoke-OrderTriggerDem {
 }
 
 while ($true) {
-  if ($script:primeUntil -and ((Get-Date) -ge $script:primeUntil) -and (-not $script:primeLogged)) {
-    $script:primeLogged = $true
-    L ('STOP-PRIME завершён: зафиксировано ' + $script:stopPrimeCount + ' состояний, толчков за старое не было')
-    $script:primeUntil = $null
-  }
   try {
     try { Invoke-SdachaScanDem } catch { L ('И-104.2 ERR ' + $_.Exception.Message) }
     $tabs = Get-CdpTabs
@@ -798,34 +792,19 @@ while ($true) {
     $snap = @()
     foreach ($tb in $tabs) {
       if ($tb.type -ne 'page') { continue }
-      if (($tb.url + '') -notmatch 'kimi\.ai/chat' -and ($tb.title + '') -notmatch ' - Kimi$') { continue }
       $sn = (($tb.title + '') -replace ' - Kimi$','').Trim()
       $e2 = Get-SessEntry $sn
       $st = 'default'
       if ($e2) { if ([bool]$e2.enabled) { $st = 'on' } else { $st = 'off' } }
-      $snap += ($sn + '=' + $st)
+      $snap += ($sn + '=tracked')
     }
     $snapS = $snap -join '; '
-    if ($snapS -ne $script:sessSnap) { $script:sessSnap = $snapS; L ('И-147 СЕССИИ: ' + $snapS) }
-    $seenSessionPorts = @{}
+    if ($snapS -ne $script:sessSnap) { $script:sessSnap = $snapS; L ('DYNAMIC-TABS: ' + $snapS) }
     foreach ($tab in $tabs) {
       if ($tab.type -ne 'page') { continue }
-      # И-101: только чат-вкладки Kimi (URL kimi.ai/chat или title " - Kimi"); прочие - молча
-      if (($tab.url + '') -notmatch 'kimi\.ai/chat' -and ($tab.title + '') -notmatch ' - Kimi$') { continue }
       $sessN = (($tab.title + '') -replace ' - Kimi$','').Trim()
       $actualPort = '9222'
-      if ($seenSessionPorts.ContainsKey($sessN)) { L ($sessN + ' | DEDUP-SKIP duplicate-window port=9222'); continue }
-      $seenSessionPorts[$sessN] = $actualPort
       $sEntry = Get-SessEntry $sessN
-      if ($sEntry -and -not [bool]$sEntry.enabled) {
-        $offKey = 'off:' + $sessN
-        if (-not $script:triggerState.PSObject.Properties[$offKey]) {
-          $script:triggerState | Add-Member -NotePropertyName $offKey -NotePropertyValue (Get-Date).ToString('o') -Force
-          Save-TriggerState
-          L ($sessN + ' | И-147 ОТКЛЮЧЕНА галочкой, скан и толчки пропущены')
-        }
-        continue
-      }
       # И-98.3-зачистка (16.10): мёртвый блок активации вкладки (SendAsync($ab) с пустой $ab
       # + поглощающий catch) удалён - вкладку читаем фоном, без поднятия окна (И-98.3).
       $ws = New-Object System.Net.WebSockets.ClientWebSocket
@@ -846,15 +825,6 @@ while ($true) {
         $isStop = $false
         $foundLine = ''
         if ($scan -and $scan['found']) { $foundLine = [string]$scan['found']; $isStop = $true }
-        # И-147: стоп-толчок только если триггер stop-line->nudge назначен (по конфигу сессии)
-        $stopNudgeAllowed = $true
-        if ($sEntry) {
-          $stopNudgeAllowed = $false
-          foreach ($t in @($sEntry.triggers)) {
-            if ([string]$t.condition.type -eq 'stop-line' -and [string]$t.action.type -eq 'nudge') { $stopNudgeAllowed = $true }
-          }
-        }
-        if (-not $stopNudgeAllowed -and $isStop) { L ($short + ' | И-147 стоп есть, но триггер stop-line->nudge не назначен, пропуск'); $isStop = $false }
         if (-not $isStop) {
           # И-169.7.1: резюм — любой ответ не-стоп снимает managed-стопы сессии
           $removed = 0
@@ -866,29 +836,33 @@ while ($true) {
           continue
         }
         # стоп найден - метка по событию (sess + текст стопа): новый стоп = новое событие
-        $fp = $sess + '|' + $foundLine
+        $fp = $sess + '|' + [string]$tab.id + '|' + $foundLine
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         $m = $markers[$fp]
         $mJ = '<новый>'; if ($m) { $mJ = ($m | ConvertTo-Json -Compress -Depth 2) }; L ($short + ' | СТОП-НАЙДЕН: "' + $foundLine + '" fp=' + $fp + ' state=' + $mJ)
-        # И-169.7.1: managed-стоп — толчки циклом (интервал 5 мин, не чаще) до N=3 без резюма; резюм снимает стоп (ветка -not $isStop)
-                if ($script:primeUntil -and ((Get-Date) -lt $script:primeUntil)) {
-          if (-not $m) { $m = @{ first = $now; processed = $now; lastTry = $null; nudges = 0; firstNudge = $now; lastNudge = $now }; $markers[$fp] = $m }
-          else { $m['state'] = 'closed'; $m['lastNudge'] = $now; $m['processed'] = $now }
+        if ($script:primeStops) {
+          if (-not $m) { $m = @{ first = $now; processed = $null; lastTry = $null; nudges = 0; firstNudge = $null; lastNudge = $null; detected_at = $now }; $markers[$fp] = $m }
+          $m['suppressed_at'] = $now
           $script:stopPrimeCount++
           Save-Markers
-          L ($short + ' | STOP-PRIME зафиксирован (не толкаем за старое) КЛЮЧ=' + $fp)
+          L ($short + ' | STOP-PRIME suppressed without delivery КЛЮЧ=' + $fp)
           continue
         }
-if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169.7.1), fire запрещён КЛЮЧ=' + $fp); continue }
+if ($m -and $m['suppressed_at']) { continue }
+        if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169.7.1), fire запрещён КЛЮЧ=' + $fp); continue }
         # И-172: одноразовый толчок уже отправлен по этому стопу - повторных не даём (новый стоп = новый fp)
         if ($m -and ($m['state'] -eq 'closed')) { L ($short + ' | state=closed (одноразовый толчок отправлен) КЛЮЧ=' + $fp); continue }
-                $lf = $m['lastNudge']; if ($m['lastTry'] -and ((-not $lf) -or ([int64]$m['lastTry'] -gt [int64]$lf))) { $lf = $m['lastTry'] }
+        $lf = $null
+        if ($m) {
+          $lf = $m['lastNudge']
+          if ($m['lastTry'] -and ((-not $lf) -or ([int64]$m['lastTry'] -gt [int64]$lf))) { $lf = $m['lastTry'] }
+        }
         if ($m -and $lf -and (($now - [int64]$lf) -lt 600)) {
-          if ([string]$m['annN'] -ne [string]$m['lastNudge']) { $m['annN'] = [string]$m['lastNudge']; Save-Markers; L ($short + ' | managed-толчок свеж (интервал 5 мин) КЛЮЧ=' + $fp) }
+          if ([string]$m['annN'] -ne [string]$lf) { $m['annN'] = [string]$lf; Save-Markers; L ($short + ' | recent stop attempt (10 min) КЛЮЧ=' + $fp) }
           continue
         }
         if ($m -and $m['firstNudge'] -and (($now - [int64]$m['firstNudge']) -gt 21600)) { L ($short + ' | managed-стоп просрочен (общий возраст ' + ($now - [int64]$m['firstNudge']) + 'с > 6ч) КЛЮЧ=' + $fp); continue }
-        if (-not $m) { $m = @{ first = $now; processed = $null; lastTry = $null; nudges = 0; firstNudge = $null; lastNudge = $null }; $markers[$fp] = $m }
+        if (-not $m) { $m = @{ first = $now; processed = $null; lastTry = $null; nudges = 0; firstNudge = $null; lastNudge = $null; detected_at = $now }; $markers[$fp] = $m }
         if ($isStop) {
           $c1 = Eval $ws "document.querySelectorAll('[class*=markdown]').length"
           Start-Sleep -Seconds 3
@@ -900,11 +874,16 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
             Start-Sleep -Seconds (Get-Random -Minimum 0 -Maximum 11)  # И-103.3: джиттер отправки толчка 0..10 с
             $nudgePort = '9222'
             L ($short + ' | NUDGE-TARGET cdp_port=9222 КЛЮЧ=' + $fp)
+            $m['attempted_at'] = $now
+            $m['lastTry'] = $now
+            Save-Markers
             $nudgeOut = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'C:\kimi-work\wake-rail\scripts\nudge-once.ps1' -To ([string]$tab.title) -DelaySec 0 *>&1
             $nudgeText = (($nudgeOut | ForEach-Object { $_.ToString() }) -join "`n")
             $res = 'FAILED'
             if ($nudgeText -match 'RESULT=DELIVERED') { $res = 'DELIVERED' }
             if ($res -eq 'DELIVERED') {
+              $m['confirmed_at'] = $now
+              Set-TriggerLastFire 'stop-budget-auto'
               $m['processed'] = $now
               $m['lastNudge'] = $now
               if (-not $m['firstNudge']) { $m['firstNudge'] = $now }
@@ -915,7 +894,6 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
             } else { $m['lastTry'] = $now }
             Save-Markers
             L ($short + ' | продлено RESULT=' + $res + ' nudges=' + [int]$m['nudges'] + ' cdp_port=' + $nudgePort + ' КЛЮЧ=' + $fp)
-            Set-TriggerLastFire 'stop-budget-auto'
             # И-169.7.1: N=3 без резюма → снять + одно финальное извещение в зал #14
             if ($script:ManagedSeriesMode -and ($res -eq 'DELIVERED') -and ([int]$m['nudges'] -ge 3)) {
               $m['cancelled'] = $now
@@ -954,6 +932,10 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
       finally { try { $ws.Dispose() } catch {} }
     }
   } catch { L ('CDP-ERR ' + $_.Exception.Message) }
+  if ($script:primeStops) {
+    $script:primeStops = $false
+    L ('STOP-PRIME complete: ' + $script:stopPrimeCount + ' existing stops suppressed; no delivery claimed')
+  }
   if ($Once) { L '--- ONCE: цикл завершён ---'; break }
   # И-171: надзор демона за сторожем (вахтёр-вахтёра) - pid-file сторожа перезаписывается каждым его циклом; старше 180с - сторож мёртв/завис
   try {
