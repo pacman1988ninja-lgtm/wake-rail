@@ -1,7 +1,6 @@
 ﻿#И-98: nudge-scan.ps1 - автопродление сессий по триггеру "Стоп по бюджету".
 # Цикл: все page-вкладки одного окна CDP 9222.
 # Триггер: 'Стоп по бюджету', маркер не обработан. Один маркер = один адресат.
-$m['attempted_at'] = $now; Save-Markers
 # Действие: отдельный nudge-once.ps1 на порту контура; bringToFront + insertText + клик,
 # RESULT=DELIVERED только по росту пользовательских сообщений.
 # И-101 (16.10): через фильтр проходят только чат-вкладки (kimi.ai/chat или title " - Kimi");
@@ -860,7 +859,7 @@ while ($true) {
           # И-169.7.1: резюм — любой ответ не-стоп снимает managed-стопы сессии
           $removed = 0
           foreach ($mk in @($markers.Keys)) {
-            if ($mk.StartsWith($sess + '|') -and ($null -ne $markers[$mk]) -and -not $markers[$mk]['cancelled']) { $markers.Remove($mk); $removed++ }
+            if ($mk.StartsWith($sess + '|') -and -not $markers[$mk]['cancelled']) { $markers.Remove($mk); $removed++ }
           }
           if ($removed -gt 0) { Save-Markers; L ($short + ' | РЕЗЮМ: ' + $removed + ' managed-стоп(ов) снято ответом не-стоп') }
           if ($scan) { L ($short + ' | СКАН: cdp_port=' + $actualPort + ' стоп=НЕТ сегментов=' + $scan['scanned'] + ' окно=' + $scan['window'] + ' хвост="' + $scan['tailLine'] + '"') } else { L ($short + ' | СКАН: пустой ответ вкладки (null)') }
@@ -873,7 +872,7 @@ while ($true) {
         $mJ = '<новый>'; if ($m) { $mJ = ($m | ConvertTo-Json -Compress -Depth 2) }; L ($short + ' | СТОП-НАЙДЕН: "' + $foundLine + '" fp=' + $fp + ' state=' + $mJ)
         # И-169.7.1: managed-стоп — толчки циклом (интервал 5 мин, не чаще) до N=3 без резюма; резюм снимает стоп (ветка -not $isStop)
                 if ($script:primeUntil -and ((Get-Date) -lt $script:primeUntil)) {
-          if (-not $m) { $m = @{ first = $now; processed = $now; lastTry = $null; nudges = 0; firstNudge = $now; lastNudge = $now; detected_at = $now }; $markers[$fp] = $m }
+          if (-not $m) { $m = @{ first = $now; processed = $now; lastTry = $null; nudges = 0; firstNudge = $now; lastNudge = $now }; $markers[$fp] = $m }
           else { $m['state'] = 'closed'; $m['lastNudge'] = $now; $m['processed'] = $now }
           $script:stopPrimeCount++
           Save-Markers
@@ -889,7 +888,7 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
           continue
         }
         if ($m -and $m['firstNudge'] -and (($now - [int64]$m['firstNudge']) -gt 21600)) { L ($short + ' | managed-стоп просрочен (общий возраст ' + ($now - [int64]$m['firstNudge']) + 'с > 6ч) КЛЮЧ=' + $fp); continue }
-        if (-not $m) { $m = @{ first = $now; processed = $null; lastTry = $null; nudges = 0; firstNudge = $null; lastNudge = $null; detected_at = $now }; $markers[$fp] = $m }
+        if (-not $m) { $m = @{ first = $now; processed = $null; lastTry = $null; nudges = 0; firstNudge = $null; lastNudge = $null }; $markers[$fp] = $m }
         if ($isStop) {
           $c1 = Eval $ws "document.querySelectorAll('[class*=markdown]').length"
           Start-Sleep -Seconds 3
@@ -906,8 +905,6 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
             $res = 'FAILED'
             if ($nudgeText -match 'RESULT=DELIVERED') { $res = 'DELIVERED' }
             if ($res -eq 'DELIVERED') {
-              $m['confirmed_at'] = $now
-              Set-TriggerLastFire 'stop-budget-auto'
               $m['processed'] = $now
               $m['lastNudge'] = $now
               if (-not $m['firstNudge']) { $m['firstNudge'] = $now }
@@ -918,6 +915,7 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
             } else { $m['lastTry'] = $now }
             Save-Markers
             L ($short + ' | продлено RESULT=' + $res + ' nudges=' + [int]$m['nudges'] + ' cdp_port=' + $nudgePort + ' КЛЮЧ=' + $fp)
+            Set-TriggerLastFire 'stop-budget-auto'
             # И-169.7.1: N=3 без резюма → снять + одно финальное извещение в зал #14
             if ($script:ManagedSeriesMode -and ($res -eq 'DELIVERED') -and ([int]$m['nudges'] -ge 3)) {
               $m['cancelled'] = $now
@@ -927,7 +925,7 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
             }
           }
         } else {
-          if ($markers -and $markers.ContainsKey($sess)) { $markers.Remove($sess); Save-Markers; L ($short + ' | ожила, маркер сброшен') } else { L ($short + ' | таб') }
+          if ($markers.ContainsKey($sess)) { $markers.Remove($sess); Save-Markers; L ($short + ' | ожила, маркер сброшен') } else { L ($short + ' | таб') }
         }
         # И-147: триггеры типа hall-substring (по телам зала из Invoke-SdachaScanDem)
         if ($sEntry) {
