@@ -435,6 +435,9 @@ function Get-HallComments {
 $script:lastSbState = $null
 $script:trigEnState = @{}
 $script:ManagedSeriesMode = $false  # И-172: серия N=3 ВЫКЛЮЧЕНА - один managed-толчок на стоп (код серии сохранён за флагом)
+$script:primeUntil = (Get-Date).AddMinutes(2)
+$script:stopPrimeCount = 0
+$script:primeLogged = $false
 $script:quarCount = 0
 $script:tripFired = $false
 $script:cfgGuardBad = 0
@@ -745,6 +748,11 @@ function Invoke-OrderTriggerDem {
 }
 
 while ($true) {
+  if ($script:primeUntil -and ((Get-Date) -ge $script:primeUntil) -and (-not $script:primeLogged)) {
+    $script:primeLogged = $true
+    L ('STOP-PRIME завершён: зафиксировано ' + $script:stopPrimeCount + ' состояний, толчков за старое не было')
+    $script:primeUntil = $null
+  }
   try {
     try { Invoke-SdachaScanDem } catch { L ('И-104.2 ERR ' + $_.Exception.Message) }
     $tabs = Get-CdpTabs
@@ -863,10 +871,19 @@ while ($true) {
         $m = $markers[$fp]
         $mJ = '<новый>'; if ($m) { $mJ = ($m | ConvertTo-Json -Compress -Depth 2) }; L ($short + ' | СТОП-НАЙДЕН: "' + $foundLine + '" fp=' + $fp + ' state=' + $mJ)
         # И-169.7.1: managed-стоп — толчки циклом (интервал 5 мин, не чаще) до N=3 без резюма; резюм снимает стоп (ветка -not $isStop)
-        if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169.7.1), fire запрещён КЛЮЧ=' + $fp); continue }
+                if ($script:primeUntil -and ((Get-Date) -lt $script:primeUntil)) {
+          if (-not $m) { $m = @{ first = $now; processed = $now; lastTry = $null; nudges = 0; firstNudge = $now; lastNudge = $now }; $markers[$fp] = $m }
+          else { $m['state'] = 'closed'; $m['lastNudge'] = $now; $m['processed'] = $now }
+          $script:stopPrimeCount++
+          Save-Markers
+          L ($short + ' | STOP-PRIME зафиксирован (не толкаем за старое) КЛЮЧ=' + $fp)
+          continue
+        }
+if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169.7.1), fire запрещён КЛЮЧ=' + $fp); continue }
         # И-172: одноразовый толчок уже отправлен по этому стопу - повторных не даём (новый стоп = новый fp)
         if ($m -and ($m['state'] -eq 'closed')) { L ($short + ' | state=closed (одноразовый толчок отправлен) КЛЮЧ=' + $fp); continue }
-        if ($m -and $m['lastNudge'] -and (($now - [int64]$m['lastNudge']) -lt 300)) {
+                $lf = $m['lastNudge']; if ($m['lastTry'] -and ((-not $lf) -or ([int64]$m['lastTry'] -gt [int64]$lf))) { $lf = $m['lastTry'] }
+        if ($m -and $lf -and (($now - [int64]$lf) -lt 600)) {
           if ([string]$m['annN'] -ne [string]$m['lastNudge']) { $m['annN'] = [string]$m['lastNudge']; Save-Markers; L ($short + ' | managed-толчок свеж (интервал 5 мин) КЛЮЧ=' + $fp) }
           continue
         }
