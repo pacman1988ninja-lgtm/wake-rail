@@ -859,7 +859,7 @@ while ($true) {
           # И-169.7.1: резюм — любой ответ не-стоп снимает managed-стопы сессии
           $removed = 0
           foreach ($mk in @($markers.Keys)) {
-            if ($mk.StartsWith($sess + '|') -and -not $markers[$mk]['cancelled']) { $markers.Remove($mk); $removed++ }
+            if ($mk.StartsWith($sess + '|') -and ($null -ne $markers[$mk]) -and -not $markers[$mk]['cancelled']) { $markers.Remove($mk); $removed++ }
           }
           if ($removed -gt 0) { Save-Markers; L ($short + ' | РЕЗЮМ: ' + $removed + ' managed-стоп(ов) снято ответом не-стоп') }
           if ($scan) { L ($short + ' | СКАН: cdp_port=' + $actualPort + ' стоп=НЕТ сегментов=' + $scan['scanned'] + ' окно=' + $scan['window'] + ' хвост="' + $scan['tailLine'] + '"') } else { L ($short + ' | СКАН: пустой ответ вкладки (null)') }
@@ -925,7 +925,7 @@ if ($m -and $m['cancelled']) { L ($short + ' | managed-стоп снят (И-169
             }
           }
         } else {
-          if ($markers.ContainsKey($sess)) { $markers.Remove($sess); Save-Markers; L ($short + ' | ожила, маркер сброшен') } else { L ($short + ' | таб') }
+          if ($markers -and $markers.ContainsKey($sess)) { $markers.Remove($sess); Save-Markers; L ($short + ' | ожила, маркер сброшен') } else { L ($short + ' | таб') }
         }
         # И-147: триггеры типа hall-substring (по телам зала из Invoke-SdachaScanDem)
         if ($sEntry) {
